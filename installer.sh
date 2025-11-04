@@ -169,15 +169,40 @@ resolve_background() {
   fi
 }
 
-ensure_helper() {
+install_helper_if_missing() {
   local helper="$1"
   case "$helper" in
     yay|paru) ;;
     *) die "Unsupported AUR helper: $helper" ;;
   esac
-  if ! command -v "$helper" >/dev/null 2>&1; then
-    die "$helper not found. Install it manually before running this script."
+  if command -v "$helper" >/dev/null 2>&1; then
+    log_verbose "[*] AUR helper '$helper' already installed"
+    return
   fi
+
+  log "[*] Installing AUR helper: $helper"
+  local build_root="$HOME_DIR/aur_builds"
+  ensure_dir "$build_root"
+
+  if [[ "$helper" == "yay" ]]; then
+    sudo pacman -S --needed --noconfirm git base-devel
+    if [[ -d "$build_root/yay/.git" ]]; then
+      (cd "$build_root/yay" && git pull --ff-only) || die "Failed to update yay repository"
+    else
+      (cd "$build_root" && git clone https://aur.archlinux.org/yay.git) || die "Failed to clone yay"
+    fi
+    (cd "$build_root/yay" && makepkg -si --noconfirm) || die "Failed to build/install yay"
+  else
+    sudo pacman -S --needed --noconfirm base-devel git
+    if [[ -d "$build_root/paru/.git" ]]; then
+      (cd "$build_root/paru" && git pull --ff-only) || die "Failed to update paru repository"
+    else
+      (cd "$build_root" && git clone https://aur.archlinux.org/paru.git) || die "Failed to clone paru"
+    fi
+    (cd "$build_root/paru" && makepkg -si --noconfirm) || die "Failed to build/install paru"
+  fi
+
+  command -v "$helper" >/dev/null 2>&1 || die "$helper installation failed"
 }
 
 build_helper_cmd() {
@@ -391,7 +416,7 @@ parse_args() {
 main() {
   parse_args "$@"
   resolve_background "$BACKGROUND_PATH"
-  ensure_helper "$AUR_HELPER"
+  install_helper_if_missing "$AUR_HELPER"
 
   local packages=("${BASE_PACKAGES[@]}")
   if [[ "$INSTALL_ALACRITTY" == "true" ]]; then
