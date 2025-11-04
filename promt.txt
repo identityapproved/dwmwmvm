@@ -1,0 +1,27 @@
+i had been started from dwminstaller.py rewritten in c installer.c
+continue write in c (review dwminstall.py and you can remove it)
+- arch linux installed via archinstall with minimal profile in virtualbox
+- only git added and required to clone this repo 
+
+review/rewrite/fix/improve installer.c script that it installs all related and mentioned in script (install virtualbox support it all will be used in vm)
+- ask what to choose st, alacritty or both (if alacritty ln -s <fullpathes> alacritty configs to .config)
+- same with dunst and dwm folders - there is configs in .config folder
+- install zsh and ohmyzsh + fix paths in .zshrc (which should be linked too) and install plugins that should be installed manually
+- install vim and link .vimrc to /home/$USER/.vimrc
+- link wallpaper/image to .config and handle it properly via script/configs
+- ask to install slstatus or not
+- don't install screen any screen lockers and remove powersaving
+- install suckless browser - surf
+- install suckless tabbed
+all this can be easily installed via package manager: 
+suggest to install one of them 
+- sudo pacman -S --needed git base-devel && git clone https://aur.archlinux.org/yay.git && cd yay && makepkg -si
+- sudo pacman -S --needed base-devel
+git clone https://aur.archlinux.org/paru.git
+cd paru
+makepkg -si
+- $ git clone https://aur.archlinux.org/pakku.git
+$ cd pakku
+$ makepkg -si
+- Uncomment the Color line in /etc/pacman.conf
+
