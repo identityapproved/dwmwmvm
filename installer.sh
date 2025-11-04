@@ -14,12 +14,10 @@ REBOOT_AFTER="false"
 VERBOSE="false"
 POWERSAVER_OFF="true"
 ASSUME_DEFAULTS="false"
-AUR_HELPER=""
+AUR_HELPER="yay"
 INSTALL_ST="true"
 INSTALL_ALACRITTY="false"
 INSTALL_SLSTATUS="true"
-TERMINAL_SPECIFIED="false"
-SLSTATUS_SPECIFIED="false"
 
 # package lists
 BASE_PACKAGES=(
@@ -43,6 +41,10 @@ BASE_PACKAGES=(
   xcompmgr
   ttf-font-awesome
   pamixer
+  dwm
+  dmenu
+  st
+  slstatus
   surf
   tabbed
   virtualbox-guest-utils
@@ -57,13 +59,6 @@ SHELL_PLUGINS=(
   "cd-ls https://github.com/zshzoo/cd-ls.git"
   "alias-tips https://github.com/djui/alias-tips.git"
   "zsh-completions https://github.com/zsh-users/zsh-completions.git"
-)
-
-declare -A SUCKLESS_REPOS=(
-  [dwm]="https://git.suckless.org/dwm"
-  [dmenu]="https://git.suckless.org/dmenu"
-  [st]="https://git.suckless.org/st"
-  [slstatus]="https://git.suckless.org/slstatus"
 )
 
 die() {
@@ -90,8 +85,8 @@ Options:
   -r, --reboot            Reboot automatically after completion.
   -v, --verbose           Enable verbose logging.
   -p, --powersaver        Keep powersaver enabled (default disables).
-  -y, --assume-yes        Accept defaults without prompting.
-      --aur-helper NAME   Choose AUR helper (yay, paru, pakku).
+  -y, --assume-yes        (Deprecated) retained for compatibility; installer is non-interactive by default.
+      --aur-helper NAME   Choose AUR helper (yay or paru).
       --terminal MODE     Choose terminal: st, alacritty, or both.
       --slstatus          Force slstatus installation.
       --no-slstatus       Skip slstatus installation.
@@ -174,146 +169,15 @@ resolve_background() {
   fi
 }
 
-prompt_menu() {
-  local prompt="$1"; shift
-  local default="$1"; shift
-  local options=("$@")
-  while true; do
-    echo "$prompt"
-    local index=1
-    for option in "${options[@]}"; do
-      if [[ "$index" -eq "$default" ]]; then
-        printf "  [%d] %s (default)\n" "$index" "$option"
-      else
-        printf "  [%d] %s\n" "$index" "$option"
-      fi
-      index=$((index + 1))
-    done
-    printf '> '
-    if ! read -r answer; then
-      return 1
-    fi
-    if [[ -z "$answer" ]]; then
-      echo "${options[$((default-1))]}"
-      return 0
-    fi
-    if [[ "$answer" =~ ^[0-9]+$ && "$answer" -ge 1 && "$answer" -le "${#options[@]}" ]]; then
-      echo "${options[$((answer-1))]}"
-      return 0
-    fi
-    echo "Invalid selection. Try again."
-  done
-}
-
-prompt_yes_no() {
-  local prompt="$1"
-  local default="$2"
-  local default_hint
-  if [[ "$default" == "yes" ]]; then
-    default_hint="Y/n"
-  else
-    default_hint="y/N"
-  fi
-  while true; do
-    read -r -p "$prompt ($default_hint): " reply || return 1
-    reply="${reply,,}"
-    if [[ -z "$reply" ]]; then
-      if [[ "$default" == "yes" ]]; then
-        echo "yes"
-      else
-        echo "no"
-      fi
-      return 0
-    fi
-    case "$reply" in
-      y|yes) echo "yes"; return 0 ;;
-      n|no) echo "no"; return 0 ;;
-      *) echo "Please answer y or n." ;;
-    esac
-  done
-}
-
-gather_terminal_choice() {
-  if [[ "$ASSUME_DEFAULTS" == "true" || ! -t 0 ]]; then
-    INSTALL_ST="true"
-    INSTALL_ALACRITTY="false"
-    return
-  fi
-  local selection
-  if ! selection="$(prompt_menu "Select terminal setup:" 1 "st" "alacritty" "both")"; then
-    die "Failed to read terminal choice"
-  fi
-  case "$selection" in
-    st)
-      INSTALL_ST="true"
-      INSTALL_ALACRITTY="false"
-      ;;
-    alacritty)
-      INSTALL_ST="false"
-      INSTALL_ALACRITTY="true"
-      ;;
-    both)
-      INSTALL_ST="true"
-      INSTALL_ALACRITTY="true"
-      ;;
-  esac
-}
-
-gather_slstatus_choice() {
-  if [[ "$ASSUME_DEFAULTS" == "true" || ! -t 0 ]]; then
-    INSTALL_SLSTATUS="true"
-    return
-  fi
-  local result
-  if ! result="$(prompt_yes_no "Install slstatus?" "yes")"; then
-    die "Failed to read slstatus choice"
-  fi
-  if [[ "$result" == "yes" ]]; then
-    INSTALL_SLSTATUS="true"
-  else
-    INSTALL_SLSTATUS="false"
-  fi
-}
-
-gather_aur_helper() {
-  if [[ -n "$AUR_HELPER" ]]; then
-    return
-  fi
-  if [[ "$ASSUME_DEFAULTS" == "true" || ! -t 0 ]]; then
-    AUR_HELPER="yay"
-    return
-  fi
-  local selection
-  if ! selection="$(prompt_menu "Choose an AUR helper to install:" 1 "yay" "paru" "pakku")"; then
-    die "Failed to select AUR helper"
-  fi
-  AUR_HELPER="$selection"
-}
-
-enable_pacman_color() {
-  log_verbose "[*] Enabling pacman Color option"
-  sudo sed -i 's/^#Color/Color/' /etc/pacman.conf || true
-}
-
-install_aur_helper() {
+ensure_helper() {
   local helper="$1"
   case "$helper" in
-    yay|paru|pakku) ;;
+    yay|paru) ;;
     *) die "Unsupported AUR helper: $helper" ;;
   esac
-  log "[*] Installing AUR helper: $helper"
-  sudo pacman -S --needed --noconfirm git base-devel || true
-  local build_root="$HOME_DIR/aur_builds"
-  ensure_dir "$build_root"
-  local repo_dir="$build_root/$helper"
-  if [[ -d "$repo_dir/.git" ]]; then
-    log_verbose "[*] Updating existing $helper clone"
-    (cd "$repo_dir" && git pull --ff-only) || true
-  else
-    (cd "$build_root" && git clone "https://aur.archlinux.org/${helper}.git") || die "Failed to clone $helper"
+  if ! command -v "$helper" >/dev/null 2>&1; then
+    die "$helper not found. Install it manually before running this script."
   fi
-  (cd "$repo_dir" && makepkg -si --noconfirm) || die "Failed to build $helper"
-  command -v "$helper" >/dev/null 2>&1 || die "$helper not found in PATH after installation"
 }
 
 build_helper_cmd() {
@@ -426,63 +290,6 @@ link_configs() {
   fi
 }
 
-clone_repo() {
-  local url="$1"
-  local destination="$2"
-  ensure_dir "$(dirname "$destination")"
-  if [[ -d "$destination/.git" ]]; then
-    log_verbose "[*] Updating $(basename "$destination")"
-    (cd "$destination" && git pull --ff-only) || true
-  else
-    log "[*] Cloning $url"
-    (cd "$(dirname "$destination")" && git clone "$url" "$(basename "$destination")") || die "Failed to clone $url"
-  fi
-}
-
-clone_suckless() {
-  local root="$HOME_DIR/Suckless"
-  ensure_dir "$root"
-  clone_repo "${SUCKLESS_REPOS[dwm]}" "$root/dwm"
-  clone_repo "${SUCKLESS_REPOS[dmenu]}" "$root/dmenu"
-  if [[ "$INSTALL_ST" == "true" ]]; then
-    clone_repo "${SUCKLESS_REPOS[st]}" "$root/st"
-  fi
-  if [[ "$INSTALL_SLSTATUS" == "true" ]]; then
-    clone_repo "${SUCKLESS_REPOS[slstatus]}" "$root/slstatus"
-  fi
-}
-
-apply_dwm_config() {
-  local source="$REPO_ROOT/suckless/.config/dwm/config.h"
-  [[ -f "$source" ]] || return
-  local dwm_dir="$HOME_DIR/Suckless/dwm"
-  [[ -d "$dwm_dir" ]] || return
-  cp "$source" "$dwm_dir/config.h"
-  cp "$source" "$dwm_dir/config.def.h"
-  if [[ "$INSTALL_ST" == "true" && "$INSTALL_ALACRITTY" == "false" ]]; then
-    sed -i 's/"alacritty"/"st"/g' "$dwm_dir/config.h" "$dwm_dir/config.def.h"
-  fi
-}
-
-build_suckless() {
-  local root="$HOME_DIR/Suckless"
-  local queue=()
-  if [[ "$INSTALL_ST" == "true" ]]; then
-    queue+=(st)
-  fi
-  queue+=(dmenu dwm)
-  if [[ "$INSTALL_SLSTATUS" == "true" ]]; then
-    queue+=(slstatus)
-  fi
-  for project in "${queue[@]}"; do
-    local dir="$root/$project"
-    if [[ -d "$dir" ]]; then
-      log "[*] Building $project"
-      (cd "$dir" && sudo make clean install) || die "Failed to build $project"
-    fi
-  done
-}
-
 configure_startup() {
   local xinit="$HOME_DIR/.xinitrc"
   append_line "$xinit" "xcompmgr &" "xcompmgr"
@@ -560,17 +367,14 @@ parse_args() {
             die "Invalid terminal option: $2"
             ;;
         esac
-        TERMINAL_SPECIFIED="true"
         shift 2
         ;;
       --slstatus)
         INSTALL_SLSTATUS="true"
-        SLSTATUS_SPECIFIED="true"
         shift
         ;;
       --no-slstatus)
         INSTALL_SLSTATUS="false"
-        SLSTATUS_SPECIFIED="true"
         shift
         ;;
       -h|--help)
@@ -587,23 +391,19 @@ parse_args() {
 main() {
   parse_args "$@"
   resolve_background "$BACKGROUND_PATH"
-
-  if [[ -z "$AUR_HELPER" ]]; then
-    gather_aur_helper
-  fi
-  if [[ "$TERMINAL_SPECIFIED" != "true" ]]; then
-    gather_terminal_choice
-  fi
-  if [[ "$SLSTATUS_SPECIFIED" != "true" ]]; then
-    gather_slstatus_choice
-  fi
-
-  enable_pacman_color
-  install_aur_helper "$AUR_HELPER"
+  ensure_helper "$AUR_HELPER"
 
   local packages=("${BASE_PACKAGES[@]}")
   if [[ "$INSTALL_ALACRITTY" == "true" ]]; then
     packages+=(alacritty)
+  fi
+  if [[ "$INSTALL_SLSTATUS" != "true" ]]; then
+    local filtered=()
+    for pkg in "${packages[@]}"; do
+      [[ "$pkg" == "slstatus" ]] && continue
+      filtered+=("$pkg")
+    done
+    packages=("${filtered[@]}")
   fi
   install_packages_with_helper "$AUR_HELPER" "${packages[@]}"
 
@@ -611,9 +411,6 @@ main() {
   setup_vim
   link_configs
 
-  clone_suckless
-  apply_dwm_config
-  build_suckless
   configure_startup
 
   log "------------------------------------------------------------"
